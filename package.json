@@ -1,0 +1,23 @@
+{
+  "name": "nunki-music",
+  "version": "1.0.0",
+  "description": "personal music app",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/semmaow/nunki-music.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/semmaow/nunki-music/issues"
+  },
+  "homepage": "https://github.com/semmaow/nunki-music#readme",
+  "dependencies": {
+    "body-parser": "^1.18.3",
+    "express": "^4.16.4"
+  }
+}
