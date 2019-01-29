@@ -11,10 +11,10 @@ app.use(bodyParser.urlencoded({
 }));
 app.use(bodyParser.json());
 
-const Datastore = require('@google-cloud/datastore');
+const {Datastore} = require('@google-cloud/datastore');
 
 // Instantiate a datastore client
-const datastore = Datastore();
+const datastore = new Datastore();
 
 
 // Helper Functions
