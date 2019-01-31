@@ -6,16 +6,43 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const app = express();
+const request = require('request');
+const rp = require('request-promise');
+
 app.use(bodyParser.urlencoded({
   extended: true
 }));
 app.use(bodyParser.json());
 
 const {Datastore} = require('@google-cloud/datastore');
+const {Storage} = require('@google-cloud/storage');
+
+
+
+
 
 // Instantiate a datastore client
 const datastore = new Datastore();
+// create a client (says the demo)
+const storage = new Storage();
 
+
+// name the bucket we're using
+const bucketName = 'nunki-music.appspot.com';
+
+async function listFiles(bucketName) {
+  // [START storage_list_files]
+
+  // Lists files in the bucket
+  const [files] = await storage.bucket(bucketName).getFiles();
+
+  console.log('Files:');
+  files.forEach(file => {
+    console.log(file.name);
+  });
+  return files
+  // [END storage_list_files]
+}
 
 // Helper Functions
 
@@ -64,6 +91,22 @@ app.post('/songs', (req, res) => {
       .send('500 - Unknown Upload Song Error')
       .end()
   });
+});
+
+// get a list of songs on the server
+app.get('/songs/', (req, res) => {
+  const songs = listFiles(bucketName)
+    .then((songs) => {
+      console.log(songs)
+      res
+        .status(200)
+        .json(songs);
+    }).catch(function(error) {
+      console.log(error);
+      res
+        .status(500)
+        .send({error:"500 - Unknown Get Songs Error"});
+    });
 });
 
 // Format off -don't know how streaming works, placeholder for now
