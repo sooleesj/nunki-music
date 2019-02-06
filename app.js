@@ -10,8 +10,9 @@ const app = express();
 // used for google upload example (GUE)
 // https://github.com/GoogleCloudPlatform/nodejs-docs-samples/blob/3bb14ef7c23305613bbfe04f03d3b83f6a120e1a/appengine/storage/standard/app.js
 const format = require('util').format;
-const Multer = require('multer');
+const Multer = require('multer'); // multer is used for file uploads
 const process = require('process');
+const path = require('path');
 
 // not used at the moment
 const request = require('request');
@@ -48,102 +49,17 @@ const bucketName = 'nunki-music.appspot.com';
 
 const bucket = storage.bucket(bucketName);
 
-
-async function listFiles(bucketName) {
-  // [START storage_list_files]
-
-  // Lists files in the bucket
-  const [files] = await storage.bucket(bucketName).getFiles();
-
-  console.log('Files:');
-  files.forEach(file => {
-    console.log(file.name);
-  });
-  return files
-  // [END storage_list_files]
-}
-
-// Helper Functions
-
-// used to get all info about an entity
-function fromDatastore(item){
-    item.id = item[Datastore.KEY].id;
-    return item;
-}
-
-const BASEURL = "https://nunki-music.appspot.com";
-
-//-----------------Datastore interaction functions------------------//
-//---Song
-
-//************************************************************
-// Get list of files currently in a particular bucket
-//************************************************************
-
-async function listFiles(bucketName) {
-  // [START storage_list_files]
-
-  // Lists files in the bucket
-  const [files] = await storage.bucket(bucketName).getFiles();
-
-  console.log('Files:');
-  files.forEach(file => {
-    console.log(file.name);
-  });
-  return files
-  // [END storage_list_files]
-}
-
-// Helper Functions
-
-// used to get all info about an entity
-function fromDatastore(item){
-    item.id = item[Datastore.KEY].id;
-    return item;
-}
-
-
-function postSong(song) {
-}
-
-
-function streamSong(songID) {
-}
-
-
-
-
-//-----------------HTTP actions----------------------------//
-//---Song
-
-// post (upload) a song - id will be automatically assigned
-app.post('/songs', (req, res) => {
-
-  // file field in song is just placeholder for now, don't know how it works
-  var song = {"name": req.body.name, 
-          "artist": req.body.artist,
-          "file": req.body.file};
-  
-  return postSong(song).then(result => {
-    song.id = result.id;
-    res
-      .status(201)
-      .json(song)
-      .end();
-  }).catch( (err) => {
-    res
-      .status(500)
-      .send('500 - Unknown Upload Song Error')
-      .end()
-  });
-});
+/***************************************************************************
+****************************************************************************
+  START HTTP Actions
+****************************************************************************
+***************************************************************************/
 
 //***************************************************************************
-// File Upload
+// START Upload a Song
+// Requires: File in req body, key='file', value=[attached file]
 //***************************************************************************
 
-// begin GUE
-// [START process]
 // Process the file upload and upload to Google Cloud Storage.
 app.post('/upload', multer.single('file'), (req, res, next) => {
   if (!req.file) {
@@ -169,16 +85,31 @@ app.post('/upload', multer.single('file'), (req, res, next) => {
 
   blobStream.end(req.file.buffer);
 });
-// [END process]
-// END File Upload
+// END Upload a Song
 //***************************************************************************
 
-
-
 //***************************************************************************
-// List all songs in the Bucket
+// START List all songs in a Bucket
 //***************************************************************************
+// Helper function
+// Takes a bucket name
+// Returns json of all files in that bucket
+
+async function listFiles(bucketName) {
+
+  // Lists files in the bucket
+  const [files] = await storage.bucket(bucketName).getFiles();
+
+//  console.log('Files:');
+//  files.forEach(file => {
+//    console.log(file.name);
+//  });
+  return files
+}
+
 // get a list of songs on the server
+// uses const global name of bucketName for now
+
 app.get('/songs/', (req, res) => {
   const songs = listFiles(bucketName)
     .then((songs) => {
@@ -206,7 +137,56 @@ app.get('/songs/', (req, res) => {
 // Stream a song by ID
 //
 //****************************************************************************
-app.get('/songs/stream/:songName', (req, res) => {
+
+
+/*
+async function downloadFile(srcFilename, destFilename) {
+  // const srcFilename = 'Remote file to download, e.g. file.txt';
+  // const destFilename = 'Local destination for file, e.g. ./local/path/to/file.txt';
+
+  const options = {
+    // The path to which the file should be downloaded, e.g. "./file.txt"
+    destination: destFilename,
+  };
+
+  // Downloads the file
+  await storage
+    .bucket(bucketName)
+    .file(srcFilename)
+    .download(options);
+
+  console.log(
+    `gs://${bucketName}/${srcFilename} downloaded to ${destFilename}.`
+  );
+  // [END storage_download_file]
+}
+*/
+
+
+
+app.get('/songs/:songName/stream', (req, res) => {
+  res.set('content-type', 'audio/mp3');
+  res.set('accept-ranges', 'bytes');
+
+  console.log("streaming file named", req.params.songName);
+  const file = __dirname + '/songs/' + req.params.songName;
+  fs.exists(file, (exists) => {
+    if (exists) {
+        const rstream = fs.createReadStream(file);
+        rstream.pipe(res);
+    } else {
+        res.send('Error song not found - 404');
+        res.end();
+    }
+  });
+});
+    
+
+
+
+
+
+/*
   //const song = streamSong(req.params.songID)
   const publicUrl = format
       ('https://storage.googleapis.com/${bucket.name}/${req.params.songName}');
@@ -230,11 +210,59 @@ app.get('/songs/stream/:songName', (req, res) => {
       }
     });
 });
+*/
+
+
+app.get('/test2', (req, res) => {
+  var file = bucket.file('tones.mp3');
+
+  console.log('here1');
+
+  res.set('content-type', 'audio/mp3');
+  res.set('accept-ranges', 'bytes');
+
+  file.createReadStream()
+    .on('error', function(err) {})
+    .on('response', function(response) {
+        })
+    .on('end', function() {
+        })
+    .pipe(res);
+
+  
+});
+
+app.get('/test', (req, res) => {
+  var file = bucket.file('tones.mp3');
+
+  console.log('here1');
+
+  
+  file.get(function(err, file, apiResponse){
+      });
+
+  console.log('here2');
+  file.get().then(function(data) {
+      var file = data[0];
+      var apiResponse = data[1];
+  }).then( (file) => {
+    console.log('file exists!');
+    res.set('content-type', 'audio/mp3');
+    res.set('accept-ranges', 'bytes');
+    const rstream = fs.createReadStream(file);
+    rstream.pipe(res);
+    }).catch(function (err) {
+      res.type('plain/text');
+      res.status(500);
+      res.send('500 stream test bork');
+      });
+});
 
 
 //----------------Other Stuff---------------//
 
 app.get('/', (req, res, next) => {
+  console.log("the app is running");
   res.send("Nunki Music App");
 });
 
