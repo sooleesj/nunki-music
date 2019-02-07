@@ -1,0 +1,5 @@
+.breadcrumb {background: #6690d6; border: 0px solid #c5d1e5; border-radius: 4px; display: block;}
+.breadcrumb {font-size: 24px; color: white;}
+.breadcrumb a {color: #bccbe5;}
+.breadcrumb a:hover {color: #ffffff;}
+.breadcrumb>.active {color: #ffffff;}
