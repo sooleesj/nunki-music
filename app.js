@@ -14,6 +14,9 @@ const Multer = require('multer'); // multer is used for file uploads
 const process = require('process');
 const path = require('path');
 
+const mp3Duration = require('mp3-duration'); // get length of mp3 in ms
+const getMP3Duration = require('get-mp3-duration'); // get length of mp3 in ms
+
 // not used at the moment
 const request = require('request');
 const rp = require('request-promise');
@@ -28,7 +31,7 @@ app.use(bodyParser.json());
 const {Datastore} = require('@google-cloud/datastore');
 const {Storage} = require('@google-cloud/storage');
 
-// used for GUE
+// defines max file size for upload
 const multer = Multer({
   storage: Multer.memoryStorage(),
   limits: {
@@ -44,10 +47,14 @@ const datastore = new Datastore();
 // create a storage client 
 const storage = new Storage();
 
-// name the bucket we're using
-const bucketName = 'nunki-music.appspot.com';
+// name the buckets we're using
+const imageBucketName = 'album-images-nunki-music';
+const imageBucket = storage.bucket(imageBucketName);
+const songBucketName = 'song-files-nunki-music';
+const songBucket = storage.bucket(songBucketName);
 
-const bucket = storage.bucket(bucketName);
+const BASEURL = "https://nunki-music.appspot.com";
+
 
 /***************************************************************************
 ****************************************************************************
@@ -57,11 +64,164 @@ const bucket = storage.bucket(bucketName);
 
 //***************************************************************************
 // START Upload a Song
-// Requires: File in req body, key='file', value=[attached file]
+// Requires: 
 //***************************************************************************
 
-// Process the file upload and upload to Google Cloud Storage.
-app.post('/upload', multer.single('file'), (req, res, next) => {
+function postSong(song) {
+  const key = datastore.key('song');
+  return datastore.save({"key": key, "data": song})
+  .then(() => {return key})
+  // get the key back from the first save, use it in the self link and resave
+  .then ( (result) => {
+    song.self = (BASEURL + "/songs/" + key.id);
+    return datastore.save({"key": key, "data": song})
+  }).then(() => {return key});
+}
+
+/*
+function mp3Duration(songBuffer, function (err, duration) {
+  if (err) return console.log(err.message);
+  return duration;
+});
+
+function getSongDuration(songBuffer){
+  console.log("gsd1");
+  mp3Duration(songBuffer, function (err, duration) {
+    if (err) return console.log(err.message);
+    console.log("duration is");
+    console.log(duration);
+    return new Promise((resolve, reject) => {
+      return duration;
+    });
+}
+*/
+
+/*
+  .then((duration) => {
+    if (err){
+      console.log("gsd err");
+      console.log(err.message);
+      throw err;
+    }
+    else {
+      console.log("gsd2");
+      console.log("here's duration");
+      console.log(duration);
+      return duration;
+    }
+  });
+}
+*/
+
+// takes a bucket name, such as songBucket, and the file object
+
+function saveFileToBucket(bucket, newFile){
+  const blob = bucket.file(newFile.originalname);
+  const blobStream = blob.createWriteStream({
+    resumable: false
+  });
+
+  return new Promise(function(resolve, reject) {
+
+    blobStream.on('error', (err)=>{
+      console.log(err.message);
+      next(err);
+    });
+
+    var publicUrl = "placeholder";
+    blobStream.on('finish', ()=>{
+      const publicUrl = format(`https://storage.googleapis.com/${bucket.name}/${blob.name}`);
+      console.log("in finish");
+      console.log(publicUrl);
+      resolve(publicUrl);
+    });
+
+    blobStream.end(newFile.buffer);
+
+    console.log("after finish");
+    console.log(publicUrl);
+
+    //resolve(publicUrl);
+  });
+}
+async function makePublic(bucketName, filename) {
+
+  // Makes the file public
+  await storage
+    .bucket(bucketName)
+    .file(filename)
+    .makePublic();
+
+  console.log(`gs://${bucketName}/${filename} is now public.`);
+}
+
+/*******************************
+/ POST method
+/******************************/
+
+app.post('/songs', multer.fields([{ name: 'artwork', maxCount: 1},
+                                  { name: 'source', maxCount: 1}]),
+                                (req, res) => {
+
+  var song = {"name": req.body.name, 
+              "artist": req.body.artist,
+              "album": req.body.album};
+
+  song.duration = getMP3Duration(req.files.source[0].buffer);
+
+  //saveFileToBucket(songBucket, req.source).then((songUrl) => {
+
+    
+    console.log("postsong1");
+  return saveFileToBucket(songBucket, req.files.source[0]).then((url)=>{
+    song.source = url;
+
+
+    console.log("song after source save");
+    console.log(song);
+
+
+    return;
+  }).then(() => {
+    return makePublic(songBucketName, req.files.source[0].originalname)
+  }).then(() => {
+    return saveFileToBucket(imageBucket, req.files.artwork[0])
+
+
+  }).then((url2)=>{
+    song.artwork = url2;
+    console.log("song after image save");
+    console.log(song);
+    return;
+  }).then(() => {
+    return makePublic(imageBucketName, req.files.artwork[0].originalname)
+  }).then(() => {
+
+  
+    return postSong(song);
+  }).then(result => {
+    song.id = result.id;
+    res
+      .status(201)
+      .json(song)
+      .end();
+  }).catch( (err) => {
+
+
+
+    res
+      .status(500)
+      .send('500 - Unknown Post Song Error')
+      .end()
+  });
+});
+
+
+
+
+
+
+/*app.post('/upload', multer.single('file'), (req, res, next) => {
   if (!req.file) {
     res.status(400).send('No file uploaded.');
     return;
@@ -85,15 +245,22 @@ app.post('/upload', multer.single('file'), (req, res, next) => {
 
   blobStream.end(req.file.buffer);
 });
+
+*/
 // END Upload a Song
 //***************************************************************************
 
+
+// TODO rewrite to use datastore instead of buckets
 //***************************************************************************
 // START List all songs in a Bucket
 //***************************************************************************
 // Helper function
 // Takes a bucket name
 // Returns json of all files in that bucket
+
+/*
+
 
 async function listFiles(bucketName) {
 
@@ -125,6 +292,9 @@ app.get('/songs/', (req, res) => {
     });
 });
 
+
+*/
+
 // END List Songs
 //****************************************************************************
 
@@ -132,86 +302,14 @@ app.get('/songs/', (req, res) => {
 
 
 
-// Format off -don't know how streaming works, placeholder for now
-//****************************************************************************
-// Stream a song by ID
-//
-//****************************************************************************
-
-
-/*
-async function downloadFile(srcFilename, destFilename) {
-  // const srcFilename = 'Remote file to download, e.g. file.txt';
-  // const destFilename = 'Local destination for file, e.g. ./local/path/to/file.txt';
-
-  const options = {
-    // The path to which the file should be downloaded, e.g. "./file.txt"
-    destination: destFilename,
-  };
-
-  // Downloads the file
-  await storage
-    .bucket(bucketName)
-    .file(srcFilename)
-    .download(options);
-
-  console.log(
-    `gs://${bucketName}/${srcFilename} downloaded to ${destFilename}.`
-  );
-  // [END storage_download_file]
-}
-*/
-
-
-
-app.get('/songs/:songName/stream', (req, res) => {
-  res.set('content-type', 'audio/mp3');
-  res.set('accept-ranges', 'bytes');
-
-  console.log("streaming file named", req.params.songName);
-  const file = __dirname + '/songs/' + req.params.songName;
-  fs.exists(file, (exists) => {
-    if (exists) {
-        const rstream = fs.createReadStream(file);
-        rstream.pipe(res);
-    } else {
-        res.send('Error song not found - 404');
-        res.end();
-    }
-  });
-});
-    
 
 
 
 
+//----------------Legacy---------------//
 
-/*
-  //const song = streamSong(req.params.songID)
-  const publicUrl = format
-      ('https://storage.googleapis.com/${bucket.name}/${req.params.songName}');
-  const file = fs.createWriteStream("song.mp3");
-
-  http.get(publicUrl, response => {
-      res
-        .status(200)
-        .pipe(file);
-    }).catch(function(error) {
-      if (error.name == 'InvalidSongIDError') {
-        res
-          .status(404)
-          .send({error:"404 - No song found with this ID"});
-      }
-      else {
-        console.log(error);
-        res
-          .status(500)
-          .send({error:"500 - Unknown Get Song By ID Error"});
-      }
-    });
-});
-*/
-
+// This is the sample that can stream directly from bucket to browser
+// Don't think we need it, but keeping just in case
 
 app.get('/test2', (req, res) => {
   var file = bucket.file('tones.mp3');
@@ -230,32 +328,6 @@ app.get('/test2', (req, res) => {
     .pipe(res);
 
   
-});
-
-app.get('/test', (req, res) => {
-  var file = bucket.file('tones.mp3');
-
-  console.log('here1');
-
-  
-  file.get(function(err, file, apiResponse){
-      });
-
-  console.log('here2');
-  file.get().then(function(data) {
-      var file = data[0];
-      var apiResponse = data[1];
-  }).then( (file) => {
-    console.log('file exists!');
-    res.set('content-type', 'audio/mp3');
-    res.set('accept-ranges', 'bytes');
-    const rstream = fs.createReadStream(file);
-    rstream.pipe(res);
-    }).catch(function (err) {
-      res.type('plain/text');
-      res.status(500);
-      res.send('500 stream test bork');
-      });
 });
 
 
@@ -279,3 +351,33 @@ app.listen(process.env.PORT || 8080, () => {
   console.log(`App listening on port ${PORT}`);
   console.log('Press Ctrl+C to quit.');
 });
+
+/*
+// Original for posting a file directly to a Bucket
+// Process the file upload and upload to Google Cloud Storage.
+app.post('/upload', multer.single('file'), (req, res, next) => {
+  if (!req.file) {
+    res.status(400).send('No file uploaded.');
+    return;
+  }
+
+  // Create a new blob in the bucket and upload the file data.
+  const blob = bucket.file(req.file.originalname);
+  const blobStream = blob.createWriteStream({
+    resumable: false
+  });
+
+  blobStream.on('error', (err) => {
+    next(err);
+  });
+
+  blobStream.on('finish', () => {
+    // The public URL can be used to directly access the file via HTTP.
+    const publicUrl = format(`https://storage.googleapis.com/${bucket.name}/${blob.name}`);
+    res.status(200).send(publicUrl);
+  });
+
+  blobStream.end(req.file.buffer);
+});
+
+*/
