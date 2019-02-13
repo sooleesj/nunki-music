@@ -7,17 +7,14 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const app = express();
 
-// used for google upload example (GUE)
-// https://github.com/GoogleCloudPlatform/nodejs-docs-samples/blob/3bb14ef7c23305613bbfe04f03d3b83f6a120e1a/appengine/storage/standard/app.js
 const format = require('util').format;
 const Multer = require('multer'); // multer is used for file uploads
 const process = require('process');
 const path = require('path');
 
-const mp3Duration = require('mp3-duration'); // get length of mp3 in ms
+//const mp3Duration = require('mp3-duration'); // get length of mp3 in ms
 const getMP3Duration = require('get-mp3-duration'); // get length of mp3 in ms
 
-// not used at the moment
 const request = require('request');
 const rp = require('request-promise');
 const fs = require('fs');
@@ -42,10 +39,16 @@ const multer = Multer({
 
 
 
-// Instantiate a datastore client
+// creat a datastore client
 const datastore = new Datastore();
 // create a storage client 
 const storage = new Storage();
+
+// used to get all info about an entity
+function fromDatastore(item){
+    item.id = item[Datastore.KEY].id;
+    return item;
+}
 
 // name the buckets we're using
 const imageBucketName = 'album-images-nunki-music';
@@ -53,6 +56,7 @@ const imageBucket = storage.bucket(imageBucketName);
 const songBucketName = 'song-files-nunki-music';
 const songBucket = storage.bucket(songBucketName);
 
+// the base url for the server
 const BASEURL = "https://nunki-music.appspot.com";
 
 
@@ -64,8 +68,9 @@ const BASEURL = "https://nunki-music.appspot.com";
 
 //***************************************************************************
 // START Upload a Song
-// Requires: 
 //***************************************************************************
+
+/* takes a song object and saves it to the Datastore */
 
 function postSong(song) {
   const key = datastore.key('song');
@@ -78,42 +83,8 @@ function postSong(song) {
   }).then(() => {return key});
 }
 
-/*
-function mp3Duration(songBuffer, function (err, duration) {
-  if (err) return console.log(err.message);
-  return duration;
-});
-
-function getSongDuration(songBuffer){
-  console.log("gsd1");
-  mp3Duration(songBuffer, function (err, duration) {
-    if (err) return console.log(err.message);
-    console.log("duration is");
-    console.log(duration);
-    return new Promise((resolve, reject) => {
-      return duration;
-    });
-}
-*/
-
-/*
-  .then((duration) => {
-    if (err){
-      console.log("gsd err");
-      console.log(err.message);
-      throw err;
-    }
-    else {
-      console.log("gsd2");
-      console.log("here's duration");
-      console.log(duration);
-      return duration;
-    }
-  });
-}
-*/
-
-// takes a bucket name, such as songBucket, and the file object
+/* takes a bucket name and a file object, saves it to a bucket
+   returns the public url to access it in the bucket */
 
 function saveFileToBucket(bucket, newFile){
   const blob = bucket.file(newFile.originalname);
@@ -128,7 +99,7 @@ function saveFileToBucket(bucket, newFile){
       next(err);
     });
 
-    var publicUrl = "placeholder";
+    var publicUrl = "placeholder you should not see";
     blobStream.on('finish', ()=>{
       const publicUrl = format(`https://storage.googleapis.com/${bucket.name}/${blob.name}`);
       console.log("in finish");
@@ -137,27 +108,28 @@ function saveFileToBucket(bucket, newFile){
     });
 
     blobStream.end(newFile.buffer);
-
-    console.log("after finish");
-    console.log(publicUrl);
-
-    //resolve(publicUrl);
   });
 }
-async function makePublic(bucketName, filename) {
 
-  // Makes the file public
+/* takes a bucket name and a filename, makes the file publicly accessible */
+
+async function makePublic(bucketName, filename) {
   await storage
     .bucket(bucketName)
     .file(filename)
     .makePublic();
 
-  console.log(`gs://${bucketName}/${filename} is now public.`);
+  // console.log(`gs://${bucketName}/${filename} is now public.`);
 }
 
-/*******************************
-/ POST method
-/******************************/
+/* POST method 
+   Takes name, artist, and album as text fields, source and artwork
+   as files in request body.
+   Saves files to bucket and song object to datastore
+   returns a song object that contains:
+   name, artist, album, duration(ms), source url, artwork url,
+   self url (in datastore), and datastore id number
+*/
 
 app.post('/songs', multer.fields([{ name: 'artwork', maxCount: 1},
                                   { name: 'source', maxCount: 1}]),
@@ -168,36 +140,20 @@ app.post('/songs', multer.fields([{ name: 'artwork', maxCount: 1},
               "album": req.body.album};
 
   song.duration = getMP3Duration(req.files.source[0].buffer);
-
-  //saveFileToBucket(songBucket, req.source).then((songUrl) => {
-
     
-    console.log("postsong1");
   return saveFileToBucket(songBucket, req.files.source[0]).then((url)=>{
     song.source = url;
-
-
-    console.log("song after source save");
-    console.log(song);
-
-
     return;
   }).then(() => {
     return makePublic(songBucketName, req.files.source[0].originalname)
   }).then(() => {
     return saveFileToBucket(imageBucket, req.files.artwork[0])
-
-
   }).then((url2)=>{
     song.artwork = url2;
-    console.log("song after image save");
-    console.log(song);
     return;
   }).then(() => {
     return makePublic(imageBucketName, req.files.artwork[0].originalname)
   }).then(() => {
-
-  
     return postSong(song);
   }).then(result => {
     song.id = result.id;
@@ -206,48 +162,78 @@ app.post('/songs', multer.fields([{ name: 'artwork', maxCount: 1},
       .json(song)
       .end();
   }).catch( (err) => {
-
-
-
     res
       .status(500)
       .send('500 - Unknown Post Song Error')
       .end()
   });
 });
+// END Upload a Song
+//***************************************************************************
 
 
 
+//***************************************************************************
+// START Get song by Id
+//***************************************************************************
 
+async function songSearch(songId) {
+  const songKey = datastore.key(['song', parseInt(songId,10)]);
+  const query = datastore.createQuery('song').filter('__key__', '=', songKey);
+  return datastore.runQuery(query);
+}
 
-
-/*app.post('/upload', multer.single('file'), (req, res, next) => {
-  if (!req.file) {
-    res.status(400).send('No file uploaded.');
-    return;
-  }
-
-  // Create a new blob in the bucket and upload the file data.
-  const blob = bucket.file(req.file.originalname);
-  const blobStream = blob.createWriteStream({
-    resumable: false
+async function validateSong(songId) {
+  const songKey = datastore.key(['song', parseInt(songId,10)]);
+  return songSearch(songId).then (results => {
+    if (results[0].length > 0) {
+      console.log("songSearch results len > 0");
+      const query = datastore.createQuery('song').filter('__key__', '=', songKey);
+      return datastore.runQuery(query);
+    }
+    else {
+      console.log("songSearch results len not > 0");
+      var e = new Error;
+      e.name = 'InvalidSongIdError';
+      throw e;
+    };
   });
-
-  blobStream.on('error', (err) => {
-    next(err);
+}
+// returns a single song 
+function getSongById(songId) {
+  return validateSong(songId).then((entities) => {
+    return entities[0].map(fromDatastore);
+  }).catch((error) => {
+    console.log("error in getSongById");
+    console.log(error);
+    throw error;
   });
+}
 
-  blobStream.on('finish', () => {
-    // The public URL can be used to directly access the file via HTTP.
-    const publicUrl = format(`https://storage.googleapis.com/${bucket.name}/${blob.name}`);
-    res.status(200).send(publicUrl);
-  });
-
-  blobStream.end(req.file.buffer);
+// get a single song by its Id
+app.get('/songs/:songId', (req, res) => {
+  const song = getSongById(req.params.songId)
+    .then((song) => {
+      res
+        .status(200)
+        .json(song);
+    }).catch(function(error) {
+      if (error.name == 'InvalidSongIdError') {
+        res
+          .status(404)
+          .send({error:"404 - No song found with this Id"});
+      }
+      else {
+        console.log(error);
+        res
+          .status(500)
+          .send({error:"500 - Unknown Get Song By Id Error"});
+      }
+    });
 });
 
-*/
-// END Upload a Song
+
+// END Get song by Id
 //***************************************************************************
 
 
