@@ -1,16 +1,4 @@
-<<<<<<< HEAD
-import React, { Component } from 'react';
-class App extends Component {
-    render() {
-        return (
-            <div>
-                <h1>Hello World</h1>
-            </div>
-        );
-    }
-}
-export default App;
-=======
+
 // Paul Robinson, Soo Lee, Michael Truong
 // CS467 - Capstone - Winter 2019
 // Nunki Music App
